@@ -145,7 +145,6 @@ elif nav == "🎧 Player":
         st.markdown(f"### {title}")
         
         with st.spinner("Fetching latest episodes..."):
-            # Added headers here too just in case the RSS feed blocks us
             headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
             try:
                 feed_resp = requests.get(feed_url, headers=headers)
@@ -173,7 +172,6 @@ elif nav == "🎧 Player":
                     
                     filename = "active_episode.mp3"
                     try:
-                        # MASKING AS A REAL BROWSER TO PREVENT HOST BLOCKS
                         download_headers = {
                             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                             'Accept': 'audio/mpeg, audio/*; q=0.9, */*; q=0.8'
@@ -185,7 +183,6 @@ elif nav == "🎧 Player":
                             for chunk in r.iter_content(chunk_size=8192):
                                 f.write(chunk)
                                 
-                        # Corrupted file safety check (files under 50kb are usually HTML error pages)
                         if os.path.getsize(filename) < 50000:
                             st.error("The downloaded audio file is suspiciously small. The podcast host is likely actively blocking automatic downloads.")
                             st.stop()
@@ -214,4 +211,14 @@ elif nav == "🎧 Player":
             st.markdown('</div>', unsafe_allow_html=True)
 
         if 'uploaded_file' in st.session_state and st.session_state.get('episode_title') == selected_ep_title:
-            if 'base
+            if 'base_summaries' not in st.session_state:
+                with st.spinner("Analyzing transcript and generating notes..."):
+                    base_prompt = """
+                    Analyze the provided podcast audio file and generate two distinct outputs. 
+                    Format your response clearly separating them with the tags [ULTRA_SHORT] and [CONCISE_5PERCENT].
+
+                    [ULTRA_SHORT]
+                    Provide a very short 1-2 paragraph overview of the entire episode, followed immediately by 3-5 high-level bullet points capturing the overarching themes.
+
+                    [CONCISE_5PERCENT]
+                    Provide a condensed set of written notes capturing the core message and key takeaways. Target a length of roughly 600 words (which takes approximately 3 minutes to read

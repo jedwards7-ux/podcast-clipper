@@ -197,7 +197,7 @@ elif nav == "🎧 Player":
                             elif "FAILED" in str(file_info.state):
                                 st.error("Google's servers failed to process this specific audio track.")
                                 st.stop()
-                            time.sleep(4)
+                            time.sleep(15)
                         
                         st.session_state['uploaded_file'] = uploaded_file
                         st.session_state['episode_title'] = selected_ep_title

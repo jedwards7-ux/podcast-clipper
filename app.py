@@ -225,7 +225,7 @@ elif nav == "🎧 Player":
                     """
                     try:
                         response = client.models.generate_content(
-                            model="gemini-1.5-flash",
+                            model="gemini-2.5-flash",
                             contents=[base_prompt, st.session_state['uploaded_file']]
                         )
                         st.session_state['base_summaries'] = response.text
@@ -266,7 +266,7 @@ elif nav == "🎧 Player":
                         3. Provide deep-dive bullet points under each concept section explaining the arguments, data points, or ideas presented.
                         """
                         detailed_response = client.models.generate_content(
-                            model="gemini-2.0-flash",
+                            model="gemini-2.5-flash",
                             contents=[detailed_prompt, st.session_state['uploaded_file']]
                         )
                         st.session_state['detailed_summary'] = detailed_response.text

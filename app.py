@@ -106,4 +106,112 @@ if nav == "🔍 Discover":
                 if feed_url in st.session_state.favorites:
                     st.button("Saved", disabled=True, key=f"saved_{feed_url}")
                 else:
-                    if st.button("⭐
+                    if st.button("⭐ Save", key=f"fav_{feed_url}"):
+                        st.session_state.favorites[feed_url] = {"title": title, "img": img_url}
+                        st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+
+# --- TAB 2: FAVORITES ---
+elif nav == "⭐ Favorites":
+    if not st.session_state.favorites:
+        st.info("You haven't saved any podcasts yet. Go to Discover to find some!")
+        
+    for feed_url, data in list(st.session_state.favorites.items()):
+        st.markdown('<div class="mobile-card">', unsafe_allow_html=True)
+        col_img, col_info = st.columns([1, 3])
+        with col_img:
+            st.image(data['img'], use_container_width=True)
+        with col_info:
+            st.markdown(f"**{data['title']}**")
+            subcol1, subcol2 = st.columns(2)
+            with subcol1:
+                if st.button("Open", key=f"open_fav_{feed_url}"):
+                    st.session_state.active_podcast = {"title": data['title'], "feed": feed_url}
+                    st.toast("Podcast selected! Go to the 'Player' tab.")
+            with subcol2:
+                if st.button("Remove", key=f"rem_{feed_url}"):
+                    del st.session_state.favorites[feed_url]
+                    st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+
+# --- TAB 3: PLAYER / SUMMARIZER ---
+elif nav == "🎧 Player":
+    if not st.session_state.active_podcast:
+        st.info("No podcast selected. Go to Discover or Favorites to pick one.")
+    else:
+        title = st.session_state.active_podcast['title']
+        feed_url = st.session_state.active_podcast['feed']
+        
+        st.markdown(f"### {title}")
+        
+        with st.spinner("Fetching latest episodes..."):
+            # Added headers here too just in case the RSS feed blocks us
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            try:
+                feed_resp = requests.get(feed_url, headers=headers)
+                parsed_feed = feedparser.parse(feed_resp.content)
+                episodes = {}
+                for entry in parsed_feed.entries:
+                    audio = next((link.href for link in entry.links if 'audio' in link.type), None)
+                    if audio:
+                        episodes[entry.title] = audio
+            except Exception as e:
+                st.error("Failed to load feed.")
+                episodes = {}
+        
+        if not episodes:
+            st.error("Could not find any playable audio in this feed.")
+        else:
+            st.markdown('<div class="mobile-card">', unsafe_allow_html=True)
+            selected_ep_title = st.selectbox("Select an Episode:", list(episodes.keys()))
+            selected_audio_url = episodes[selected_ep_title]
+            
+            if st.button("Process & Summarize"):
+                with st.spinner("Downloading audio and uploading to Google AI..."):
+                    st.session_state.pop('base_summaries', None)
+                    st.session_state.pop('detailed_summary', None)
+                    
+                    filename = "active_episode.mp3"
+                    try:
+                        # MASKING AS A REAL BROWSER TO PREVENT HOST BLOCKS
+                        download_headers = {
+                            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                            'Accept': 'audio/mpeg, audio/*; q=0.9, */*; q=0.8'
+                        }
+                        r = requests.get(selected_audio_url, stream=True, headers=download_headers, allow_redirects=True)
+                        r.raise_for_status()
+                        
+                        with open(filename, 'wb') as f:
+                            for chunk in r.iter_content(chunk_size=8192):
+                                f.write(chunk)
+                                
+                        # Corrupted file safety check (files under 50kb are usually HTML error pages)
+                        if os.path.getsize(filename) < 50000:
+                            st.error("The downloaded audio file is suspiciously small. The podcast host is likely actively blocking automatic downloads.")
+                            st.stop()
+                                
+                        uploaded_file = client.files.upload(file=filename)
+                        
+                        st.info("Audio sent to Google! Waiting for the AI processing to finish (this takes about 30-60 seconds)...")
+                        while True:
+                            file_info = client.files.get(name=uploaded_file.name)
+                            if "ACTIVE" in str(file_info.state):
+                                break
+                            elif "FAILED" in str(file_info.state):
+                                st.error("Google's servers failed to process this specific audio track.")
+                                st.stop()
+                            time.sleep(4)
+                        
+                        st.session_state['uploaded_file'] = uploaded_file
+                        st.session_state['episode_title'] = selected_ep_title
+                        st.success("Ready for analysis!")
+                        
+                    except Exception as e:
+                        st.error(f"Download Error: {e}")
+                    finally:
+                        if os.path.exists(filename):
+                            os.remove(filename)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        if 'uploaded_file' in st.session_state and st.session_state.get('episode_title') == selected_ep_title:
+            if 'base

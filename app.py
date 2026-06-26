@@ -221,4 +221,56 @@ elif nav == "🎧 Player":
                     Provide a very short 1-2 paragraph overview of the entire episode, followed immediately by 3-5 high-level bullet points capturing the overarching themes.
 
                     [CONCISE_5PERCENT]
-                    Provide a condensed set of written notes capturing the core message and key takeaways. Target a length of roughly 600 words (which takes approximately 3 minutes to read
+                    Provide a condensed set of written notes capturing the core message and key takeaways. Target a length of roughly 600 words (which takes approximately 3 minutes to read at an average pace). Avoid fluff; prioritize dense, actionable insights.
+                    """
+                    try:
+                        response = client.models.generate_content(
+                            model="gemini-2.0-flash",
+                            contents=[base_prompt, st.session_state['uploaded_file']]
+                        )
+                        st.session_state['base_summaries'] = response.text
+                    except Exception as e:
+                        st.error(f"AI Generation Error: {e}")
+
+            if 'base_summaries' in st.session_state:
+                raw_text = st.session_state['base_summaries']
+                
+                if "[CONCISE_5PERCENT]" in raw_text:
+                    ultra_short = raw_text.split("[CONCISE_5PERCENT]")[0].replace("[ULTRA_SHORT]", "").strip()
+                    concise_notes = raw_text.split("[CONCISE_5PERCENT]")[-1].strip()
+                else:
+                    ultra_short = raw_text
+                    concise_notes = "Formatting error. Please re-run the summary."
+
+                st.markdown('<div class="mobile-card">', unsafe_allow_html=True)
+                st.markdown("#### ⚡ Quick Overview")
+                st.markdown(ultra_short)
+                st.markdown('</div>', unsafe_allow_html=True)
+
+                st.markdown('<div class="mobile-card">', unsafe_allow_html=True)
+                st.markdown("#### ⏱️ Concise Notes (~3 Min Read)")
+                st.markdown(concise_notes)
+                st.markdown('</div>', unsafe_allow_html=True)
+
+                st.markdown('<div class="mobile-card">', unsafe_allow_html=True)
+                st.markdown("#### 🔍 Deep Dive Breakdown")
+                if st.button("Generate 15% Chronological Summary"):
+                    with st.spinner("Analyzing structural breakdown..."):
+                        detailed_prompt = """
+                        Analyze the provided podcast audio file and generate a highly detailed summary.
+                        Target an overall length of roughly 15% of the total metadata volume (approximately 1,500 to 1,800 words for a 60-minute show).
+                        
+                        Requirements:
+                        1. Organize the summary chronologically as it unfolds in the audio.
+                        2. Divide the text into logical structural sections using clear headers based on the concepts, subjects, or subjects addressed.
+                        3. Provide deep-dive bullet points under each concept section explaining the arguments, data points, or ideas presented.
+                        """
+                        detailed_response = client.models.generate_content(
+                            model="gemini-2.0-flash",
+                            contents=[detailed_prompt, st.session_state['uploaded_file']]
+                        )
+                        st.session_state['detailed_summary'] = detailed_response.text
+
+                if 'detailed_summary' in st.session_state:
+                    st.markdown(st.session_state['detailed_summary'])
+                st.markdown('</div>', unsafe_allow_html=True)

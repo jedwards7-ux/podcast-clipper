@@ -48,7 +48,6 @@ with col_toggle:
         st.session_state.dark_mode = not st.session_state.dark_mode
         st.rerun()
 
-# Added the 4th tab: "📝 Deep Dive"
 nav = st.radio("Navigation", ["🔍 Discover", "⭐ Favorites", "🎧 Player", "📝 Deep Dive"], horizontal=True, label_visibility="collapsed")
 
 # --- TAB 1: DISCOVER ---
@@ -166,7 +165,6 @@ elif nav == "🎧 Player":
                             )
                             st.session_state.current_summary = sum_response.text
                             
-                            # Safely drop the heavy remote file now that we have text cached
                             client.files.delete(name=st.session_state.uploaded_file_ref.name)
                             st.session_state.uploaded_file_ref = None
                             
@@ -183,7 +181,37 @@ elif nav == "🎧 Player":
             st.markdown(st.session_state.current_summary)
             st.markdown('</div>', unsafe_allow_html=True)
 
-# --- TAB 4: NEW DEEP DIVE & CACHED TEXT CHAT ---
+# --- TAB 4: DEEP DIVE & CACHED TEXT CHAT ---
 elif nav == "📝 Deep Dive":
     if not st.session_state.transcript:
-        st.info("No text log found. Please
+        st.info("No text log found. Please pick an episode and hit 'Process & Summarize' in the Player tab first.")
+    else:
+        st.markdown("### 📖 Full Structural Transcript Log")
+        with st.expander("View Full Extracted Text Log", expanded=True):
+            st.markdown(st.session_state.transcript)
+            
+        st.markdown("---")
+        st.markdown("### 💬 Local Text Chat Assistant")
+        st.caption("This assistant reads the text logged above. No audio re-listening required.")
+        
+        for msg in st.session_state.messages:
+            with st.chat_message(msg["role"]): 
+                st.markdown(msg["content"])
+        
+        if prompt := st.chat_input("Ask a question about the text log..."):
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user"): 
+                st.markdown(prompt)
+                
+            with st.chat_message("assistant"):
+                with st.spinner("Analyzing text cache..."):
+                    try:
+                        chat_context = f"You are analyzing a podcast episode. Use the detailed structural text log below to answer the user's prompt.\n\n[EPISODE LOG]\n{st.session_state.transcript}\n\n[USER QUESTION]\n{prompt}"
+                        response = client.models.generate_content(
+                            model="gemini-2.5-flash",
+                            contents=[chat_context]
+                        )
+                        st.markdown(response.text)
+                        st.session_state.messages.append({"role": "assistant", "content": response.text})
+                    except Exception as e:
+                        st.error(f"API Error during chat execution: {e}")

@@ -78,6 +78,7 @@ if nav == "🔍 Discover":
             if st.button("⭐ Save Show", key=f"fav_{pod.get('feedUrl')}"):
                 st.session_state.favorites[pod.get('feedUrl')] = {"title": pod.get('collectionName')}
                 st.toast("Saved to Favorites!")
+                st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
 # --- TAB 2: FAVORITES ---
@@ -142,17 +143,21 @@ elif nav == "🎧 Player":
                         if "ACTIVE" in str(file_info.state):
                             break
                         elif "FAILED" in str(file_info.state):
-                            st.error("Audio processing file compilation failed.")
-                            break
+                            status_area.empty()
+                            st.error("Google's servers failed to process this specific audio track.")
+                            st.stop() # Prevents the script from trying to analyze a failed file
                         time.sleep(15)
                     status_area.empty()
                     
                     with st.spinner("Analyzing audio content..."):
-                        response = client.models.generate_content(
-                            model="gemini-2.5-flash",
-                            contents=[st.session_state.uploaded_file_ref, "Provide a comprehensive, high-level summary of this podcast episode."]
-                        )
-                        st.session_state.current_summary = response.text
+                        try:
+                            response = client.models.generate_content(
+                                model="gemini-2.5-flash",
+                                contents=[st.session_state.uploaded_file_ref, "Provide a comprehensive, high-level summary of this podcast episode."]
+                            )
+                            st.session_state.current_summary = response.text
+                        except Exception as e:
+                            st.error(f"Google API Server Error: The server choked on the analysis. Please try clicking Process again. Error details: {e}")
             else:
                 st.error("No enclosure audio format found for this entry.")
 
@@ -175,9 +180,12 @@ elif nav == "🎧 Player":
                     
                 with st.chat_message("assistant"):
                     with st.spinner("Reviewing audio context..."):
-                        response = client.models.generate_content(
-                            model="gemini-2.5-flash",
-                            contents=[st.session_state.uploaded_file_ref, prompt]
-                        )
-                        st.markdown(response.text)
-                        st.session_state.messages.append({"role": "assistant", "content": response.text})
+                        try:
+                            response = client.models.generate_content(
+                                model="gemini-2.5-flash",
+                                contents=[st.session_state.uploaded_file_ref, prompt]
+                            )
+                            st.markdown(response.text)
+                            st.session_state.messages.append({"role": "assistant", "content": response.text})
+                        except Exception as e:
+                            st.error(f"API Error during chat execution: {e}")

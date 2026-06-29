@@ -17,6 +17,7 @@ if "active_podcast" not in st.session_state: st.session_state.active_podcast = N
 if "search_results" not in st.session_state: st.session_state.search_results = []
 if "messages" not in st.session_state: st.session_state.messages = []
 if "current_summary" not in st.session_state: st.session_state.current_summary = ""
+if "transcript" not in st.session_state: st.session_state.transcript = ""
 if "uploaded_file_ref" not in st.session_state: st.session_state.uploaded_file_ref = None
 
 # --- UI & CSS LAYOUT POLISH ---
@@ -30,7 +31,6 @@ accent_color = "#6200EE"
 st.markdown(f"""
     <style>
         .main .block-container {{ max-width: 500px !important; padding: 1rem !important; }}
-        /* Eliminates the dead white space under navigation radio buttons */
         [data-testid="stRadio"] div[role="radiogroup"] {{ margin-bottom: 0px !important; padding: 0px !important; }}
         div.stRadio > div {{ margin-top: -10px !important; }}
         .mobile-card {{ background-color: {card_bg}; border-radius: 16px; padding: 16px; margin-bottom: 12px; border: 1px solid #E1E8ED; }}
@@ -71,6 +71,7 @@ if nav == "🔍 Discover":
             if st.button("🎧 Open Show", key=f"open_{pod.get('feedUrl')}"):
                 st.session_state.active_podcast = {"title": pod.get('collectionName'), "feed": pod.get('feedUrl')}
                 st.session_state.current_summary = ""
+                st.session_state.transcript = ""
                 st.session_state.messages = []
                 st.session_state.uploaded_file_ref = None
                 st.rerun()
@@ -92,6 +93,7 @@ elif nav == "⭐ Favorites":
             if st.button("🎧 Open Show", key=f"fav_open_{feed_url}"):
                 st.session_state.active_podcast = {"title": data['title'], "feed": feed_url}
                 st.session_state.current_summary = ""
+                st.session_state.transcript = ""
                 st.session_state.messages = []
                 st.session_state.uploaded_file_ref = None
                 st.rerun()
@@ -120,8 +122,10 @@ elif nav == "🎧 Player":
                 
             if audio_url:
                 if st.button("🎙️ Process & Summarize Episode"):
-                    st.session_state.messages = [] # Reset chat for new episode
-                    with st.spinner("Downloading audio stream to local cache..."):
+                    st.session_state.messages = [] 
+                    st.session_state.transcript = ""
+                    
+                    with st.spinner("Downloading audio stream..."):
                         r = requests.get(audio_url, stream=True)
                         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
                             for chunk in r.iter_content(chunk_size=1024*1024):
@@ -145,23 +149,36 @@ elif nav == "🎧 Player":
                         elif "FAILED" in str(file_info.state):
                             status_area.empty()
                             st.error("Google's servers failed to process this specific audio track.")
-                            st.stop() # Prevents the script from trying to analyze a failed file
+                            st.stop()
                         time.sleep(15)
                     status_area.empty()
                     
-                    with st.spinner("Analyzing audio content..."):
+                    with st.spinner("Transcribing and Summarizing content..."):
                         try:
-                            response = client.models.generate_content(
+                            # 1. Fetch the absolute full text transcript first
+                            tx_response = client.models.generate_content(
                                 model="gemini-2.5-flash",
-                                contents=[st.session_state.uploaded_file_ref, "Provide a comprehensive, high-level summary of this podcast episode."]
+                                contents=[st.session_state.uploaded_file_ref, "Provide a word-for-word complete transcript or a detailed textual log of everything spoken in this audio."]
                             )
-                            st.session_state.current_summary = response.text
+                            st.session_state.transcript = tx_response.text
+                            
+                            # 2. Use that transcript to build the high-level summary immediately
+                            sum_response = client.models.generate_content(
+                                model="gemini-2.5-flash",
+                                contents=[f"Based entirely on the following podcast transcript, provide a comprehensive summary:\n\n{st.session_state.transcript}"]
+                            )
+                            st.session_state.current_summary = sum_response.text
+                            
+                            # Clean up file reference from API since we now have the text cached locally
+                            client.files.delete(name=st.session_state.uploaded_file_ref.name)
+                            st.session_state.uploaded_file_ref = None
+                            
                         except Exception as e:
-                            st.error(f"Google API Server Error: The server choked on the analysis. Please try clicking Process again. Error details: {e}")
+                            st.error(f"Google API Server Error: {e}")
             else:
                 st.error("No enclosure audio format found for this entry.")
 
-        # Display analysis results and interactive chat assistant
+        # Display analysis results and text-based chat assistant
         if st.session_state.current_summary:
             st.markdown('<div class="mobile-card">', unsafe_allow_html=True)
             st.markdown("### 📝 Episode Summary")
@@ -179,11 +196,13 @@ elif nav == "🎧 Player":
                     st.markdown(prompt)
                     
                 with st.chat_message("assistant"):
-                    with st.spinner("Reviewing audio context..."):
+                    with st.spinner("Reading transcript cache..."):
                         try:
+                            # Pure text-based reasoning now. Snappy and free-tier safe.
+                            chat_context = f"You are analyzing a podcast episode. Use the text transcript below to answer the user's prompt.\n\n[TRANSCRIPT]\n{st.session_state.transcript}\n\n[PROMPT]\n{prompt}"
                             response = client.models.generate_content(
                                 model="gemini-2.5-flash",
-                                contents=[st.session_state.uploaded_file_ref, prompt]
+                                contents=[chat_context]
                             )
                             st.markdown(response.text)
                             st.session_state.messages.append({"role": "assistant", "content": response.text})

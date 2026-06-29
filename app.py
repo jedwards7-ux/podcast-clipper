@@ -35,7 +35,7 @@ st.markdown(f"""
         div.stRadio > div {{ margin-top: -10px !important; }}
         .mobile-card {{ background-color: {card_bg}; border-radius: 16px; padding: 16px; margin-bottom: 12px; border: 1px solid #E1E8ED; }}
         .stButton>button {{ width: 100%; border-radius: 10px; border: none; background: {accent_color}; color: white; padding: 8px; font-weight: 600; }}
-        h1, h2, h3 {{ color: {text_color}; margin-top: 0px !important; margin-bottom: 8px !important; }}
+        h1, h2, h3, h4 {{ color: {text_color}; margin-top: 0px !important; margin-bottom: 8px !important; }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -48,7 +48,8 @@ with col_toggle:
         st.session_state.dark_mode = not st.session_state.dark_mode
         st.rerun()
 
-nav = st.radio("Navigation", ["🔍 Discover", "⭐ Favorites", "🎧 Player"], horizontal=True, label_visibility="collapsed")
+# Added the 4th tab: "📝 Deep Dive"
+nav = st.radio("Navigation", ["🔍 Discover", "⭐ Favorites", "🎧 Player", "📝 Deep Dive"], horizontal=True, label_visibility="collapsed")
 
 # --- TAB 1: DISCOVER ---
 if nav == "🔍 Discover":
@@ -99,7 +100,7 @@ elif nav == "⭐ Favorites":
                 st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
-# --- TAB 3: PLAYER & INTERACTIVE CHAT ---
+# --- TAB 3: PLAYER & SCRUB ---
 elif nav == "🎧 Player":
     if not st.session_state.active_podcast:
         st.info("Pick a show from Discover or Favorites first.")
@@ -124,6 +125,7 @@ elif nav == "🎧 Player":
                 if st.button("🎙️ Process & Summarize Episode"):
                     st.session_state.messages = [] 
                     st.session_state.transcript = ""
+                    st.session_state.current_summary = ""
                     
                     with st.spinner("Downloading audio stream..."):
                         r = requests.get(audio_url, stream=True)
@@ -135,17 +137,14 @@ elif nav == "🎧 Player":
                     with st.spinner("Uploading to Google File API..."):
                         uploaded_file = client.files.upload(file=tmp_path)
                         st.session_state.uploaded_file_ref = uploaded_file
-                        try:
-                            os.remove(tmp_path)
-                        except OSError:
-                            pass
+                        try: os.remove(tmp_path)
+                        except OSError: pass
                             
                     status_area = st.empty()
                     while True:
                         file_info = client.files.get(name=st.session_state.uploaded_file_ref.name)
                         status_area.info(f"Processing audio file status: {file_info.state}")
-                        if "ACTIVE" in str(file_info.state):
-                            break
+                        if "ACTIVE" in str(file_info.state): break
                         elif "FAILED" in str(file_info.state):
                             status_area.empty()
                             st.error("Google's servers failed to process this specific audio track.")
@@ -153,58 +152,38 @@ elif nav == "🎧 Player":
                         time.sleep(15)
                     status_area.empty()
                     
-                    with st.spinner("Transcribing and Summarizing content..."):
+                    with st.spinner("Analyzing and extraction processing..."):
                         try:
-                            # 1. Fetch the absolute full text transcript first
                             tx_response = client.models.generate_content(
                                 model="gemini-2.5-flash",
-                                contents=[st.session_state.uploaded_file_ref, "Provide a word-for-word complete transcript or a detailed textual log of everything spoken in this audio."]
+                                contents=[st.session_state.uploaded_file_ref, "Provide an exhaustive, highly detailed timeline log capturing every topic, player, argument, and detail discussed in this audio format context."]
                             )
                             st.session_state.transcript = tx_response.text
                             
-                            # 2. Use that transcript to build the high-level summary immediately
                             sum_response = client.models.generate_content(
                                 model="gemini-2.5-flash",
-                                contents=[f"Based entirely on the following podcast transcript, provide a comprehensive summary:\n\n{st.session_state.transcript}"]
+                                contents=[f"Based entirely on the following detailed podcast breakdown, provide a concise, readable high-level executive summary:\n\n{st.session_state.transcript}"]
                             )
                             st.session_state.current_summary = sum_response.text
                             
-                            # Clean up file reference from API since we now have the text cached locally
+                            # Safely drop the heavy remote file now that we have text cached
                             client.files.delete(name=st.session_state.uploaded_file_ref.name)
                             st.session_state.uploaded_file_ref = None
                             
+                            st.toast("Processing complete! Head over to the Deep Dive tab.")
+                            
                         except Exception as e:
-                            st.error(f"Google API Server Error: {e}")
+                            st.error(f"Google API Error during asset processing: {e}")
             else:
                 st.error("No enclosure audio format found for this entry.")
 
-        # Display analysis results and text-based chat assistant
         if st.session_state.current_summary:
             st.markdown('<div class="mobile-card">', unsafe_allow_html=True)
-            st.markdown("### 📝 Episode Summary")
+            st.markdown("### 📝 High-Level Summary")
             st.markdown(st.session_state.current_summary)
             st.markdown('</div>', unsafe_allow_html=True)
-            
-            st.markdown("### 💬 Podcast Assistant")
-            for msg in st.session_state.messages:
-                with st.chat_message(msg["role"]): 
-                    st.markdown(msg["content"])
-            
-            if prompt := st.chat_input("Ask a question about this episode..."):
-                st.session_state.messages.append({"role": "user", "content": prompt})
-                with st.chat_message("user"): 
-                    st.markdown(prompt)
-                    
-                with st.chat_message("assistant"):
-                    with st.spinner("Reading transcript cache..."):
-                        try:
-                            # Pure text-based reasoning now. Snappy and free-tier safe.
-                            chat_context = f"You are analyzing a podcast episode. Use the text transcript below to answer the user's prompt.\n\n[TRANSCRIPT]\n{st.session_state.transcript}\n\n[PROMPT]\n{prompt}"
-                            response = client.models.generate_content(
-                                model="gemini-2.5-flash",
-                                contents=[chat_context]
-                            )
-                            st.markdown(response.text)
-                            st.session_state.messages.append({"role": "assistant", "content": response.text})
-                        except Exception as e:
-                            st.error(f"API Error during chat execution: {e}")
+
+# --- TAB 4: NEW DEEP DIVE & CACHED TEXT CHAT ---
+elif nav == "📝 Deep Dive":
+    if not st.session_state.transcript:
+        st.info("No text log found. Please

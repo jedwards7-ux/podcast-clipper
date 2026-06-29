@@ -16,9 +16,8 @@ if "active_podcast" not in st.session_state: st.session_state.active_podcast = N
 if "search_results" not in st.session_state: st.session_state.search_results = []
 if "messages" not in st.session_state: st.session_state.messages = []
 
-# --- UI & PROFESSIONAL CSS ---
+# --- UI & CSS ---
 st.set_page_config(page_title="PodBrief", layout="centered")
-
 bg_color = "#121212" if st.session_state.dark_mode else "#F4F7F9"
 card_bg = "#1E1E1E" if st.session_state.dark_mode else "#FFFFFF"
 text_color = "#E0E0E0" if st.session_state.dark_mode else "#2C3E50"
@@ -26,11 +25,11 @@ accent_color = "#6200EE"
 
 st.markdown(f"""
     <style>
-        .main .block-container {{ max-width: 500px !important; padding: 2rem !important; }}
-        .mobile-card {{ background-color: {card_bg}; border-radius: 20px; padding: 20px; margin-bottom: 20px; box-shadow: 0 8px 24px rgba(0,0,0,0.1); border: 1px solid #E1E8ED; }}
-        .stButton>button {{ width: 100%; border-radius: 12px; border: none; background: {accent_color}; color: white; font-weight: 600; padding: 12px; transition: 0.3s; }}
-        .stButton>button:hover {{ filter: brightness(1.2); transform: scale(1.02); }}
-        h1, h2, h3 {{ color: {text_color}; }}
+        .main .block-container {{ max-width: 500px !important; padding: 1rem !important; }}
+        [data-testid="stRadio"] {{ margin-bottom: 10px !important; }}
+        .mobile-card {{ background-color: {card_bg}; border-radius: 20px; padding: 15px; margin-bottom: 15px; border: 1px solid #E1E8ED; }}
+        .stButton>button {{ width: 100%; border-radius: 12px; border: none; background: {accent_color}; color: white; padding: 10px; font-weight: 600; }}
+        h1, h3 {{ color: {text_color}; margin-top: 0px !important; }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -48,20 +47,19 @@ nav = st.radio("Navigation", ["🔍 Discover", "⭐ Favorites", "🎧 Player"], 
 if nav == "🔍 Discover":
     st.markdown('<div class="mobile-card">', unsafe_allow_html=True)
     st.markdown("### Search Directory")
-    query = st.text_input("Podcast Topic/Title", placeholder="e.g. Fantasy Football", help="Enter a keyword to search iTunes.")
+    query = st.text_input("Search", placeholder="e.g. Fantasy Football", label_visibility="collapsed")
     if st.button("Query Database"):
         with st.spinner("Searching..."):
-            safe_query = urllib.parse.quote(query)
-            resp = requests.get(f"https://itunes.apple.com/search?term={safe_query}&media=podcast&limit=10")
+            resp = requests.get(f"https://itunes.apple.com/search?term={urllib.parse.quote(query)}&media=podcast&limit=10")
             if resp.status_code == 200: st.session_state.search_results = resp.json().get('results', [])
     st.markdown('</div>', unsafe_allow_html=True)
     
     for pod in st.session_state.search_results:
         st.markdown('<div class="mobile-card">', unsafe_allow_html=True)
         st.write(f"**{pod.get('collectionName')}**")
-        feed_url = pod.get('feedUrl')
-        if st.button("⭐ Save Show", key=f"fav_{feed_url}"):
-            st.session_state.favorites[feed_url] = {"title": pod.get('collectionName'), "img": pod.get('artworkUrl100')}
+        if st.button("🎧 Open Show", key=f"open_{pod.get('feedUrl')}"):
+            st.session_state.active_podcast = {"title": pod.get('collectionName'), "feed": pod.get('feedUrl')}
+            st.toast("Podcast selected!")
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -75,24 +73,20 @@ elif nav == "🎧 Player":
     if not st.session_state.active_podcast:
         st.info("Pick a show from Discover first.")
     else:
-        # File processing and Chat
+        st.write(f"### Now Playing: {st.session_state.active_podcast['title']}")
+        # [Add your episode processing logic here]
         if 'uploaded_file' in st.session_state:
-            # Polling to prevent Free Tier 429s
             while True:
                 file_info = client.files.get(name=st.session_state['uploaded_file'].name)
                 if "ACTIVE" in str(file_info.state): break
                 time.sleep(15) 
-            
-            st.markdown("### 💬 Podcast Assistant")
-            for msg in st.session_state.messages:
-                with st.chat_message(msg["role"]): st.markdown(msg["content"])
             
             if prompt := st.chat_input("Ask a question about this episode..."):
                 st.session_state.messages.append({"role": "user", "content": prompt})
                 with st.chat_message("user"): st.markdown(prompt)
                 with st.chat_message("assistant"):
                     response = client.models.generate_content(
-                        model="gemini-3.5-flash",
+                        model="gemini-1.5-flash",
                         contents=[st.session_state['uploaded_file'], prompt]
                     )
                     st.markdown(response.text)

@@ -1,5 +1,6 @@
 import os
 import time
+import tempfile
 import feedparser
 import requests
 import streamlit as st
@@ -15,9 +16,12 @@ if "favorites" not in st.session_state: st.session_state.favorites = {}
 if "active_podcast" not in st.session_state: st.session_state.active_podcast = None
 if "search_results" not in st.session_state: st.session_state.search_results = []
 if "messages" not in st.session_state: st.session_state.messages = []
+if "current_summary" not in st.session_state: st.session_state.current_summary = ""
+if "uploaded_file_ref" not in st.session_state: st.session_state.uploaded_file_ref = None
 
-# --- UI & CSS ---
+# --- UI & CSS LAYOUT POLISH ---
 st.set_page_config(page_title="PodBrief", layout="centered")
+
 bg_color = "#121212" if st.session_state.dark_mode else "#F4F7F9"
 card_bg = "#1E1E1E" if st.session_state.dark_mode else "#FFFFFF"
 text_color = "#E0E0E0" if st.session_state.dark_mode else "#2C3E50"
@@ -26,16 +30,19 @@ accent_color = "#6200EE"
 st.markdown(f"""
     <style>
         .main .block-container {{ max-width: 500px !important; padding: 1rem !important; }}
-        [data-testid="stRadio"] {{ margin-bottom: 10px !important; }}
-        .mobile-card {{ background-color: {card_bg}; border-radius: 20px; padding: 15px; margin-bottom: 15px; border: 1px solid #E1E8ED; }}
-        .stButton>button {{ width: 100%; border-radius: 12px; border: none; background: {accent_color}; color: white; padding: 10px; font-weight: 600; }}
-        h1, h3 {{ color: {text_color}; margin-top: 0px !important; }}
+        /* Eliminates the dead white space under navigation radio buttons */
+        [data-testid="stRadio"] div[role="radiogroup"] {{ margin-bottom: 0px !important; padding: 0px !important; }}
+        div.stRadio > div {{ margin-top: -10px !important; }}
+        .mobile-card {{ background-color: {card_bg}; border-radius: 16px; padding: 16px; margin-bottom: 12px; border: 1px solid #E1E8ED; }}
+        .stButton>button {{ width: 100%; border-radius: 10px; border: none; background: {accent_color}; color: white; padding: 8px; font-weight: 600; }}
+        h1, h2, h3 {{ color: {text_color}; margin-top: 0px !important; margin-bottom: 8px !important; }}
     </style>
 """, unsafe_allow_html=True)
 
 # --- HEADER ---
 col_title, col_toggle = st.columns([0.8, 0.2])
-with col_title: st.title("🎙️ PodBrief")
+with col_title: 
+    st.title("🎙️ PodBrief")
 with col_toggle:
     if st.button("🌙" if not st.session_state.dark_mode else "☀️"):
         st.session_state.dark_mode = not st.session_state.dark_mode
@@ -47,47 +54,130 @@ nav = st.radio("Navigation", ["🔍 Discover", "⭐ Favorites", "🎧 Player"], 
 if nav == "🔍 Discover":
     st.markdown('<div class="mobile-card">', unsafe_allow_html=True)
     st.markdown("### Search Directory")
-    query = st.text_input("Search", placeholder="e.g. Fantasy Football", label_visibility="collapsed")
+    query = st.text_input("Search Input", placeholder="e.g. Fantasy Football", label_visibility="collapsed")
     if st.button("Query Database"):
         with st.spinner("Searching..."):
-            resp = requests.get(f"https://itunes.apple.com/search?term={urllib.parse.quote(query)}&media=podcast&limit=10")
-            if resp.status_code == 200: st.session_state.search_results = resp.json().get('results', [])
+            safe_query = urllib.parse.quote(query)
+            resp = requests.get(f"https://itunes.apple.com/search?term={safe_query}&media=podcast&limit=10")
+            if resp.status_code == 200: 
+                st.session_state.search_results = resp.json().get('results', [])
     st.markdown('</div>', unsafe_allow_html=True)
     
     for pod in st.session_state.search_results:
         st.markdown('<div class="mobile-card">', unsafe_allow_html=True)
         st.write(f"**{pod.get('collectionName')}**")
-        if st.button("🎧 Open Show", key=f"open_{pod.get('feedUrl')}"):
-            st.session_state.active_podcast = {"title": pod.get('collectionName'), "feed": pod.get('feedUrl')}
-            st.toast("Podcast selected!")
-            st.rerun()
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🎧 Open Show", key=f"open_{pod.get('feedUrl')}"):
+                st.session_state.active_podcast = {"title": pod.get('collectionName'), "feed": pod.get('feedUrl')}
+                st.session_state.current_summary = ""
+                st.session_state.messages = []
+                st.session_state.uploaded_file_ref = None
+                st.rerun()
+        with col2:
+            if st.button("⭐ Save Show", key=f"fav_{pod.get('feedUrl')}"):
+                st.session_state.favorites[pod.get('feedUrl')] = {"title": pod.get('collectionName')}
+                st.toast("Saved to Favorites!")
         st.markdown('</div>', unsafe_allow_html=True)
 
 # --- TAB 2: FAVORITES ---
 elif nav == "⭐ Favorites":
-    for feed_url, data in st.session_state.favorites.items():
-        st.markdown(f'<div class="mobile-card">**{data["title"]}**</div>', unsafe_allow_html=True)
+    if not st.session_state.favorites:
+        st.info("No saved shows found in this session.")
+    else:
+        for feed_url, data in st.session_state.favorites.items():
+            st.markdown('<div class="mobile-card">', unsafe_allow_html=True)
+            st.write(f"**{data['title']}**")
+            if st.button("🎧 Open Show", key=f"fav_open_{feed_url}"):
+                st.session_state.active_podcast = {"title": data['title'], "feed": feed_url}
+                st.session_state.current_summary = ""
+                st.session_state.messages = []
+                st.session_state.uploaded_file_ref = None
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
 
-# --- TAB 3: PLAYER ---
+# --- TAB 3: PLAYER & INTERACTIVE CHAT ---
 elif nav == "🎧 Player":
     if not st.session_state.active_podcast:
-        st.info("Pick a show from Discover first.")
+        st.info("Pick a show from Discover or Favorites first.")
     else:
-        st.write(f"### Now Playing: {st.session_state.active_podcast['title']}")
-        # [Add your episode processing logic here]
-        if 'uploaded_file' in st.session_state:
-            while True:
-                file_info = client.files.get(name=st.session_state['uploaded_file'].name)
-                if "ACTIVE" in str(file_info.state): break
-                time.sleep(15) 
+        st.markdown(f"### Now Playing: {st.session_state.active_podcast['title']}")
+        
+        with st.spinner("Fetching latest episodes..."):
+            feed = feedparser.parse(st.session_state.active_podcast['feed'])
+            
+        if not feed.entries:
+            st.error("Unable to parse RSS feed elements.")
+        else:
+            episodes = {ep.title: ep for ep in feed.entries[:10]}
+            selected_title = st.selectbox("Select Episode", list(episodes.keys()), label_visibility="collapsed")
+            selected_ep = episodes[selected_title]
+            
+            audio_url = None
+            if hasattr(selected_ep, 'enclosures') and selected_ep.enclosures:
+                audio_url = selected_ep.enclosures[0].href
+                
+            if audio_url:
+                if st.button("🎙️ Process & Summarize Episode"):
+                    st.session_state.messages = [] # Reset chat for new episode
+                    with st.spinner("Downloading audio stream to local cache..."):
+                        r = requests.get(audio_url, stream=True)
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
+                            for chunk in r.iter_content(chunk_size=1024*1024):
+                                if chunk: tmp.write(chunk)
+                            tmp_path = tmp.name
+                            
+                    with st.spinner("Uploading to Google File API..."):
+                        uploaded_file = client.files.upload(file=tmp_path)
+                        st.session_state.uploaded_file_ref = uploaded_file
+                        try:
+                            os.remove(tmp_path)
+                        except OSError:
+                            pass
+                            
+                    status_area = st.empty()
+                    while True:
+                        file_info = client.files.get(name=st.session_state.uploaded_file_ref.name)
+                        status_area.info(f"Processing audio file status: {file_info.state}")
+                        if "ACTIVE" in str(file_info.state):
+                            break
+                        elif "FAILED" in str(file_info.state):
+                            st.error("Audio processing file compilation failed.")
+                            break
+                        time.sleep(15)
+                    status_area.empty()
+                    
+                    with st.spinner("Analyzing audio content..."):
+                        response = client.models.generate_content(
+                            model="gemini-2.5-flash",
+                            contents=[st.session_state.uploaded_file_ref, "Provide a comprehensive, high-level summary of this podcast episode."]
+                        )
+                        st.session_state.current_summary = response.text
+            else:
+                st.error("No enclosure audio format found for this entry.")
+
+        # Display analysis results and interactive chat assistant
+        if st.session_state.current_summary:
+            st.markdown('<div class="mobile-card">', unsafe_allow_html=True)
+            st.markdown("### 📝 Episode Summary")
+            st.markdown(st.session_state.current_summary)
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            st.markdown("### 💬 Podcast Assistant")
+            for msg in st.session_state.messages:
+                with st.chat_message(msg["role"]): 
+                    st.markdown(msg["content"])
             
             if prompt := st.chat_input("Ask a question about this episode..."):
                 st.session_state.messages.append({"role": "user", "content": prompt})
-                with st.chat_message("user"): st.markdown(prompt)
+                with st.chat_message("user"): 
+                    st.markdown(prompt)
+                    
                 with st.chat_message("assistant"):
-                    response = client.models.generate_content(
-                        model="gemini-1.5-flash",
-                        contents=[st.session_state['uploaded_file'], prompt]
-                    )
-                    st.markdown(response.text)
-                    st.session_state.messages.append({"role": "assistant", "content": response.text})
+                    with st.spinner("Reviewing audio context..."):
+                        response = client.models.generate_content(
+                            model="gemini-2.5-flash",
+                            contents=[st.session_state.uploaded_file_ref, prompt]
+                        )
+                        st.markdown(response.text)
+                        st.session_state.messages.append({"role": "assistant", "content": response.text})
